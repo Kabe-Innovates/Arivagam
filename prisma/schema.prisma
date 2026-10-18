@@ -1,0 +1,351 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth (NextAuth) ───────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Core Models ───────────────────────────────────────────────
+
+enum UserRole {
+  STUDENT
+  FACULTY
+  MENTOR
+  MANAGER
+  ADMIN
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  registerNo    String?   @unique
+  studentId     String?   @unique
+  role          UserRole  @default(STUDENT)
+  linkedinUrl   String?
+  githubUrl     String?
+  about         String?   @db.Text
+
+  accounts          Account[]
+  sessions          Session[]
+  enrollments       StudentSubject[]
+  attendanceRecords Attendance[]
+  rewardTransactions RewardTransaction[]
+  workflowRequests  WorkflowRequest[]
+  workflowApprovals WorkflowApproval[]
+  eventBookings     EventBooking[]
+  mentorGroups      MentorMenteeGroup[] @relation("GroupMentors")
+  menteeGroups      MentorMenteeGroup[] @relation("GroupMentees")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Academics ─────────────────────────────────────────────────
+
+model AcademicTerm {
+  id   String @id @default(cuid())
+  name String
+  code String @unique
+
+  slots       AcademicSlot[]
+  rewardTerms RewardTerm[]
+
+  createdAt DateTime @default(now())
+}
+
+model AcademicSlot {
+  id        String @id @default(cuid())
+  code      String @unique
+  name      String
+  venue     String?
+  startTime String
+  endTime   String
+  startDate DateTime
+  endDate   DateTime
+
+  termId String
+  term   AcademicTerm @relation(fields: [termId], references: [id])
+
+  sessions    SlotSession[]
+  enrollments StudentSubject[]
+
+  createdAt DateTime @default(now())
+}
+
+model SlotSession {
+  id        String   @id @default(cuid())
+  date      DateTime
+  startTime String
+  endTime   String
+
+  slotId String
+  slot   AcademicSlot @relation(fields: [slotId], references: [id])
+
+  attendanceRecords Attendance[]
+
+  createdAt DateTime @default(now())
+}
+
+enum AttendanceStatus {
+  SCHEDULED
+  IN_OTP_PENDING
+  IN_OTP_ENTERED
+  IN_APPROVED
+  OUT_OTP_PENDING
+  OUT_OTP_ENTERED
+  OUT_APPROVED
+  FEEDBACK_PENDING
+  RECORDED
+  ABSENT
+}
+
+model Attendance {
+  id     String           @id @default(cuid())
+  status AttendanceStatus @default(SCHEDULED)
+
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  sessionId String
+  session   SlotSession @relation(fields: [sessionId], references: [id])
+
+  inOtpEnteredAt  DateTime?
+  inApprovedAt    DateTime?
+  outOtpEnteredAt DateTime?
+  outApprovedAt   DateTime?
+  feedbackAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, sessionId])
+}
+
+model StudentSubject {
+  id               String  @id @default(cuid())
+  enrollmentMode   String  @default("Class")
+  overallAttendance Float?
+  feedbackStatus   Int     @default(0)
+  feedbackPending  Int     @default(0)
+
+  userId String
+  user   User         @relation(fields: [userId], references: [id])
+  slotId String
+  slot   AcademicSlot @relation(fields: [slotId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, slotId])
+}
+
+// ─── Circulars ─────────────────────────────────────────────────
+
+enum CircularType {
+  INFO
+  NOTIFICATION
+}
+
+enum CircularRole {
+  MANAGER
+  MENTOR
+  PARTICIPANT
+}
+
+model Circular {
+  id      String        @id @default(cuid())
+  title   String
+  content String        @db.Text
+  type    CircularType
+  role    CircularRole
+  date    DateTime
+
+  createdAt DateTime @default(now())
+}
+
+// ─── Rewards ───────────────────────────────────────────────────
+
+model RewardTerm {
+  id   String @id @default(cuid())
+  name String
+  code String @unique
+
+  academicTermId String?
+  academicTerm   AcademicTerm? @relation(fields: [academicTermId], references: [id])
+
+  transactions RewardTransaction[]
+
+  createdAt DateTime @default(now())
+}
+
+model RewardTransaction {
+  id          String  @id @default(cuid())
+  date        DateTime
+  debit       Float   @default(0)
+  credit      Float   @default(0)
+  balance     Float   @default(0)
+  description String
+
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  rewardTermId String
+  rewardTerm   RewardTerm @relation(fields: [rewardTermId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// ─── Workflows ─────────────────────────────────────────────────
+
+enum WorkflowType {
+  GENERAL_LETTER
+  LEAVE_APPLICATION
+  EVENT_APPLICATION
+  MANUAL_ACADEMIC_ATTENDANCE
+  MANUAL_EVENT_ATTENDANCE
+  REWARD_CLAIM
+}
+
+enum WorkflowStatus {
+  DRAFT
+  NEW
+  PENDING
+  APPROVED
+  REJECTED
+  REVIEW
+}
+
+model WorkflowRequest {
+  id           String         @id @default(cuid())
+  title        String
+  description  String?        @db.Text
+  type         WorkflowType
+  status       WorkflowStatus @default(DRAFT)
+  workflowName String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  approvals WorkflowApproval[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
+  QUEUED
+}
+
+model WorkflowApproval {
+  id     String         @id @default(cuid())
+  status ApprovalStatus @default(PENDING)
+
+  requestId String
+  request   WorkflowRequest @relation(fields: [requestId], references: [id])
+  approverId String
+  approver   User            @relation(fields: [approverId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Events ────────────────────────────────────────────────────
+
+model EventTerm {
+  id   String @id @default(cuid())
+  name String
+  code String @unique
+
+  bookings EventBooking[]
+
+  createdAt DateTime @default(now())
+}
+
+model EventBooking {
+  id          String   @id @default(cuid())
+  sessionName String
+  date        DateTime
+
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  eventTermId String
+  eventTerm   EventTerm @relation(fields: [eventTermId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// ─── Mentor-Mentee ─────────────────────────────────────────────
+
+enum MentorGroupType {
+  ACADEMIC_MENTOR
+  HOSTEL_MENTOR
+  ACADEMIC_MENTOR_LOG
+}
+
+model MentorMenteeGroup {
+  id          String          @id @default(cuid())
+  code        String          @unique
+  type        MentorGroupType
+  description String?
+  active      Boolean         @default(true)
+
+  mentors User[] @relation("GroupMentors")
+  mentees User[] @relation("GroupMentees")
+
+  createdAt DateTime @default(now())
+}
+
+// ─── Services ──────────────────────────────────────────────────
+
+model Service {
+  id          String @id @default(cuid())
+  name        String
+  description String
+  urlPath     String @unique
+
+  createdAt DateTime @default(now())
+}
